@@ -3,8 +3,6 @@ import shutil
 from tqdm import tqdm
 import numpy as np
 import imageio
-
-from .utils import crop_ruler_area_short, get_ruler_Crop_Area, crop_image_2
 import matplotlib.pyplot as plt
 from keras.models import Sequential
 from keras.layers import Conv2D, MaxPooling2D
@@ -18,6 +16,8 @@ from keras.layers.normalization import BatchNormalization
 from keras.optimizers import SGD
 from keras.preprocessing import image
 import glob
+from .utils import crop_ruler_area_short, get_ruler_Crop_Area, crop_image_2
+
 #
 # test_dir = 'test_videos'
 # train_dir = 'train_videos'
@@ -55,8 +55,6 @@ def video2images_train(df, dir_out, split=0.8):
     crop_area_cache = {}
     for img_hash in df['hash'].unique():
 
-        #         if vid_i >= 1:
-        #             break
         fr_max = df[df['hash'] == img_hash].frame.max()
         row = df[(df['hash'] == img_hash) & (df['frame'] == fr_max)].iloc[0]
 

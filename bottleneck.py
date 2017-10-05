@@ -21,6 +21,8 @@ from PIL import Image as pil_image
 from .utils import get_ruler_Crop_Area, Crop_Area, crop_image, get_class_sim, crop_areas
 from .Histories import Histories
 import os
+import glob
+from tqdm import tqdm
 
 bottelneck_dir = 'bottleneck'
 
@@ -38,7 +40,7 @@ def_model_name = 'hash_fish_detection_bottelneck'
 
 
 
-class Bottelneck():
+class Bottleneck():
 
     def __init__(self, base_model, model_name=None, pooling=None, verbose=0):
         """
@@ -62,16 +64,22 @@ class Bottelneck():
         # this is the augmentation configuration we will use for testing:
         if base_model == 'VGG16':
             self.train_datagen, self.test_datagen = get_datagens(vgg16.preprocess_input)
+            self.preprocess_input = vgg16.preprocess_input
         elif base_model == 'Xception':
             self.train_datagen, self.test_datagen = get_datagens(xception.preprocess_input)
+            self.preprocess_input = xception.preprocess_input
         elif base_model == 'VGG19':
             self.train_datagen, self.test_datagen = get_datagens(vgg19.preprocess_input)
+            self.preprocess_input = vgg19.preprocess_input
         elif base_model == 'ResNet50':
             self.train_datagen, self.test_datagen = get_datagens(resnet50.preprocess_input)
+            self.preprocess_input = resnet50.preprocess_input
         elif base_model == 'InceptionV3':
             self.train_datagen, self.test_datagen = get_datagens(inception_v3.preprocess_input)
+            self.preprocess_input = inception_v3.preprocess_input
         elif base_model == 'MobileNet':
             self.train_datagen, self.test_datagen = get_datagens(mobilenet.preprocess_input)
+            self.preprocess_input = mobilenet.preprocess_input
 
         # create the base pre-trained model
         if base_model == 'VGG16':
@@ -85,7 +93,7 @@ class Bottelneck():
         elif base_model == 'InceptionV3':
             base_model = inception_v3.InceptionV3(weights='imagenet', include_top=False, pooling=pooling)
         elif base_model == 'MobileNet':
-            base_model = mobilenet.MobileNet(input_shape=(224,224, 3), weights='imagenet', include_top=False, pooling=pooling)
+            base_model = mobilenet.MobileNet(input_shape=(224, 224, 3), weights='imagenet', include_top=False, pooling=pooling)
 
         # add a global spatial average pooling layer
         x = base_model.output
@@ -164,10 +172,23 @@ class Bottelneck():
 
         return x
 
+    def load_img(self, path):
+
+        img = pil_image.open(path)
+
+        hw_tuple = (self.img_shape[1], self.img_shape[0])
+        if img.size != hw_tuple:
+            img = img.resize(hw_tuple)
+
+        x = image.img_to_array(img)[:, :, 0:3]
+        x = self.preprocess_input(x)
+
+        return x
+
     def predict_one(self, image_in):
         x = self.prepare_img(image_in)
         x = np.expand_dims(x, axis=0)
-        x = vgg16.preprocess_input(x)
+        x = self.preprocess_input(x)
 
         res = self.model.predict(x)
         # {'fish': 0, 'nonfish': 1}
@@ -185,7 +206,7 @@ class Bottelneck():
             x = self.train_datagen.random_transform(img)
             img_arr[i] = x
 
-        img_arr = vgg16.preprocess_input(img_arr)
+        img_arr = self.preprocess_input(img_arr)
         res = self.model.predict(img_arr)
 
         return 1.0 - res.mean()
@@ -249,16 +270,76 @@ class Bottelneck():
 
         return 1.0 - prediction
 
+    def predict_dir(self, dir_in, path_out):
+        df = pd.DataFrame(columns=['video_id', 'frame', 'prob'])
+        files = glob.glob(dir_in + '/*.png')
+
+        pbar = tqdm(total=len(files))
+        for path in files:
+            video_id, frame = os.path.basename(path)[:-4].split('_')
+            x = self.load_img(path)
+            x = np.expand_dims(x, axis=0)
+            res = self.model.predict(x)
+            prob = 1.0 - res[0][0]
+
+            df = df.append({'video_id': video_id,
+                       'frame': frame,
+                       'prob': prob
+                       }, ignore_index=True)
+
+            pbar.update(1)
+
+        df.to_csv(path_out, index=False)
+
+    def predict_mean_dir(self, dir_in, path_out, n_tran=3):
+        df = pd.DataFrame(columns=['video_id', 'frame', 'prob'])
+        files = glob.glob(dir_in + '/*.png')
+
+        pbar = tqdm(total=len(files))
+        for path in files:
+            video_id, frame = os.path.basename(path)[:-4].split('_')
+            x = self.load_img(path)
+
+            img_arr = np.zeros((n_tran, *self.img_shape, 3), dtype='float32')
+
+            for i in range(n_tran):
+                # if i == 0:
+                #     img_arr[i] = x
+                #     # img_arr[i] = self.preprocess_input(x)
+                #     continue
+
+                x = self.train_datagen.random_transform(x)
+                img_arr[i] = x
+                # img_arr[i] = self.preprocess_input(x)
+
+            # img_arr = self.preprocess_input(img_arr)
+            res = self.model.predict(img_arr)
+
+            print(res, res.mean())
+            prob = 1.0 - res.mean()
+
+            df = df.append({'video_id': video_id,
+                       'frame': frame,
+                       'prob': prob
+                       }, ignore_index=True)
+
+            pbar.update(1)
+
+        df.to_csv(path_out, index=False)
+
+
+
+
 
 def get_datagens(preprocess_input_fun):
     train_datagen = ImageDataGenerator(
-        shear_range=0.2,
-        rotation_range=10,
-        width_shift_range=0.2,
-        height_shift_range=0.2,
-        channel_shift_range=0.1,
-        fill_mode='reflect',
-        zoom_range=0.2,
+        # shear_range=0.1,
+        rotation_range=5,
+        width_shift_range=0.1,
+        height_shift_range=0.1,
+        channel_shift_range=0.01,
+        fill_mode='wrap',
+        # zoom_range=0.1,
         vertical_flip=True,
         horizontal_flip=True,
         preprocessing_function=preprocess_input_fun)
