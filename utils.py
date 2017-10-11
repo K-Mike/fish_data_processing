@@ -14,8 +14,8 @@ df_train_cl = pd.read_csv('/mnt/data/jupyter/ddata_fish/data_train_hash.csv', in
 image_utils = importlib.machinery.SourceFileLoader('image_utils','/mnt/data/jupyter/ddata_fish/image_utils/__init__.py').load_module()
 # from  mnt/data/jupyter/ddata_fish/image_utils import find_ruler_contours, get_contour_groups, ContourGroup
 
-test_dir = 'test_videos'
-train_dir = 'train_videos'
+test_dir = '/mnt/nvme/jupyter/ddata_fish/test_videos'
+train_dir = '/mnt/nvme/jupyter/ddata_fish/train_videos'
 img_shape = (1280, 720)
 
 test_video_ids = ['0EmM5wsVVNqaKNaM',
@@ -307,6 +307,7 @@ def crop_image_2(img, crop_area, k=2, kh=0.05):
 
     return crop_img
 
+
 def get_class_sim(df, frame):
     img_hash = imagehash.whash(Image.fromarray(frame), hash_size=32)
     X = df[['class', 'hash']].copy()
@@ -319,3 +320,6 @@ def get_class_sim(df, frame):
     c = Counter(X.iloc[ind - 3:ind]['class'])
 
     return c.most_common()[0][0]
+
+
+

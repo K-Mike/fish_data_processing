@@ -3,6 +3,7 @@ import shutil
 from tqdm import tqdm
 import numpy as np
 import imageio
+import pandas as pd
 import matplotlib.pyplot as plt
 from keras.models import Sequential
 from keras.layers import Conv2D, MaxPooling2D
@@ -16,14 +17,14 @@ from keras.layers.normalization import BatchNormalization
 from keras.optimizers import SGD
 from keras.preprocessing import image
 import glob
-from .utils import crop_ruler_area_short, get_ruler_Crop_Area, crop_image_2
+import pickle
+from .utils import crop_ruler_area_short, get_ruler_Crop_Area, crop_image_2, test_dir, train_dir
 
 #
 # test_dir = 'test_videos'
 # train_dir = 'train_videos'
 
-test_dir = '/mnt/nvme/jupyter/ddata_fish/test_videos'
-train_dir = '/mnt/nvme/jupyter/ddata_fish/train_videos'
+
 
 
 def video2images_train(df, dir_out, split=0.8):
@@ -138,6 +139,31 @@ def video2images_test(dir_out):
 
         pbar.update(1)
 
+def video2images_test_2(dir_out):
+
+    if os.path.exists(dir_out):
+        shutil.rmtree(dir_out)
+    os.makedirs(dir_out)
+
+    with open('crop_areas_test.pkl', 'rb') as f:
+        crop_areas = pickle.load(f)
+
+    videos = glob.glob(test_dir + '/*.mp4')
+    pbar = tqdm(total=len(videos))
+    for video_path in videos:
+        video_id = os.path.basename(video_path)[:-4]
+        crop_area = crop_areas[video_id]
+
+        vid = imageio.get_reader(video_path, 'ffmpeg')
+        for i_fr, frame in enumerate(vid):
+            #         crop_img = crop_image(frame, crop_area)
+            crop_img = crop_image_2(frame, crop_area)
+            fname = '_'.join([video_id, str(i_fr).zfill(5)]) + '.png'
+            path_out = os.path.join(dir_out, fname)
+
+            plt.imsave(path_out, crop_img)
+
+        pbar.update(1)
 
 def create_simple_CNN(img_shape):
 
@@ -317,3 +343,52 @@ def create_like_vgg16_CNN_batchnorm_bin(img_shape, fl_size=(3, 3)):
     print(model.summary())
 
     return model
+
+
+def find_train_frames(df_train_cl):
+    # create table with video_ids and n_frames for cropping
+
+    res_df = pd.DataFrame(columns=['video_id', 'frame', 'y'])
+    for img_hash in df_train_cl['hash'].unique():
+
+        fr_max = df_train_cl[df_train_cl['hash'] == img_hash].frame.max()
+        row = df_train_cl[(df_train_cl['hash'] == img_hash) & (df_train_cl['frame'] == fr_max)].iloc[0]
+
+        fish_frames = np.array(df_train_cl[df_train_cl['video_id'] == row.video_id].frame)
+        fish_frames.sort(axis=0)
+        ind = np.where(fish_frames == row.frame)[0][0]
+        res_df = res_df.append({'video_id': row.video_id, 'frame': fish_frames[ind], 'y': 1}, ignore_index=True)
+
+        i_frame_bad = []
+        if ind > 0:
+            n_i = int((fish_frames[ind] + fish_frames[ind - 1]) / 2)
+            i_frame_bad.append(n_i)
+
+        if fish_frames.shape[0] > ind + 1:
+            n_i = int((fish_frames[ind + 1] + fish_frames[ind]) / 2)
+            i_frame_bad.append(n_i)
+
+        for i_fr in i_frame_bad:
+            res_df = res_df.append({'video_id': row.video_id, 'frame': i_fr, 'y': 0}, ignore_index=True)
+
+    return res_df
+
+
+def calculate_crop_areas(df, path_out):
+
+    crop_areas = {}
+    pbar = tqdm(total=df.video_id.unique().shape[0])
+    for video_id in df.video_id.unique():
+
+        video_path = os.path.join(train_dir, video_id + '.mp4')
+        vid = imageio.get_reader(video_path, 'ffmpeg')
+
+        crop_area = get_ruler_Crop_Area(vid)
+        crop_areas[video_id] = crop_area
+
+        pbar.update(1)
+
+    with open(path_out, 'wb') as f:
+        pickle.dump(crop_areas, f, pickle.HIGHEST_PROTOCOL)
+
+    return crop_areas

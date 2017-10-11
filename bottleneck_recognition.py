@@ -24,6 +24,8 @@ import os
 import glob
 from tqdm import tqdm
 
+from .fish_recognition import translate_dict
+
 bottelneck_dir = 'bottleneck'
 
 img_shape_dict = {'VGG16': (224, 224),
@@ -35,12 +37,10 @@ img_shape_dict = {'VGG16': (224, 224),
                   'MobileNet': (224, 224)
                   }
 
-def_model_name = 'hash_fish_detection_bottelneck'
+def_model_name = 'hash_fish_recognition_bottelneck'
 
 
-
-
-class Bottleneck():
+class Bottleneck_recognition():
 
     def __init__(self, base_model, model_name=None, pooling=None, verbose=0):
         """
@@ -61,6 +61,7 @@ class Bottleneck():
         else:
             self.model_name = model_name
         # this is the augmentation configuration we will use for training
+        # and
         # this is the augmentation configuration we will use for testing:
         if base_model == 'VGG16':
             self.train_datagen, self.test_datagen = get_datagens(vgg16.preprocess_input)
@@ -100,7 +101,7 @@ class Bottleneck():
         x = GlobalAveragePooling2D()(x)
         x = Dense(1024, activation='relu')(x)
         x = Dropout(0.2)(x)
-        predictions = Dense(1, activation='sigmoid')(x)
+        predictions = Dense(len(translate_dict.keys()), activation='softmax')(x)
 
         # this is the model we will train
         self.model = Model(inputs=base_model.input, outputs=predictions)
@@ -109,7 +110,7 @@ class Bottleneck():
             layer.trainable = False
 
         # compile the model (should be done *after* setting layers to non-trainable)
-        self.model.compile(loss='binary_crossentropy',
+        self.model.compile(loss='categorical_crossentropy',
                           optimizer='adam',
                           metrics=['accuracy'])
 
@@ -130,14 +131,14 @@ class Bottleneck():
             data_train_dir,
             target_size=self.img_shape,
             batch_size=batch_size,
-            class_mode='binary')
+            class_mode='categorical')
 
         # this is a similar generator, for validation data
         self.validation_generator = self.test_datagen.flow_from_directory(
             data_valid_dir,
             target_size=self.img_shape,
             batch_size=batch_size,
-            class_mode='binary')
+            class_mode='categorical')
 
         # create callbacks
         def_path_log = os.path.join(bottelneck_dir, self.model_name + '.csv')
@@ -253,32 +254,12 @@ class Bottleneck():
 
         return 1.0 - prediction
 
-    def predict_vid_fast(self, vid, batch_size=None):
-        df_train_cl = pd.read_csv('/mnt/data/jupyter/ddata_fish/data_train_hash.csv', index_col=0)
-
-        vid_leng = vid.get_length()
-        img_arr = np.zeros((vid_leng, *self.img_shape, 3), dtype='float32')
-
-        cl = get_class_sim(df_train_cl, vid.get_data(0))
-        crop_area = crop_areas[cl]
-        for i, img in enumerate(vid):
-            crop_img = crop_image(img, crop_area)
-            img_arr[i] = self.prepare_img(crop_img)
-
-        img_arr = vgg16.preprocess_input(img_arr)
-        prediction = self.model.predict(img_arr, batch_size=batch_size)
-
-        return 1.0 - prediction
-
     def predict_dir(self, dir_in, path_out):
         df = pd.DataFrame(columns=['video_id', 'frame', 'prob'])
         files = glob.glob(dir_in + '/*.png')
 
         pbar = tqdm(total=len(files))
-        for i, path in enumerate(files):
-
-            # if i > 1000:
-            #     break
+        for path in files:
             video_id, frame = os.path.basename(path)[:-4].split('_')
             x = self.load_img(path)
             x = np.expand_dims(x, axis=0)
